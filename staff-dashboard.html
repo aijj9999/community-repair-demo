@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>叫修清單後台</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>叫修清單後台</h1>
+    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切換深淺色">🌓</button>
+  </div>
+  <div class="container">
+    <div id="loading" class="empty-state">載入中…</div>
+    <div id="view"></div>
+  </div>
+
+  <script>
+    'use strict';
+    const ROLE = { ADMIN: '管理員', SUPERVISOR: '負責人', WORKER: '工人' };
+    const view = document.getElementById('view');
+    let me = null;
+    let reload = function () { return Promise.resolve(); };
+
+    boot(async function () {
+      const staff = await api('getStaffBinding');
+      document.getElementById('loading').style.display = 'none';
+      if (!staff) return renderNotRegistered();
+      me = { role: staff['角色'], company: staff['所屬公司'], name: staff['姓名'] };
+
+      const content = el('div');
+      renderList(view, [
+        el('div', { className: 'card muted', text: me.name + '｜' + me.role + (me.company ? '｜' + me.company : '') }),
+        content
+      ]);
+      if (me.role === ROLE.WORKER) return startWorker(content);
+      if (me.role === ROLE.SUPERVISOR) return startSupervisor(content);
+      if (me.role === ROLE.ADMIN) return startAdmin(content);
+      renderList(content, [el('div', { className: 'empty-state', text: '這個身分沒有可用的功能' })]);
+    });
+
+    function fail(e) { toast(e.message, true); }
+
+    // 按下按鈕 → 呼叫後端 → 成功就重新載入清單，失敗就顯示錯誤訊息
+    function actionButton(label, className, fn) {
+      const btn = el('button', { className: className, type: 'button', text: label });
+      btn.addEventListener('click', function () {
+        runBusy(btn, async function () {
+          try {
+            await fn();
+            await reload();
+          } catch (e) {
+            fail(e);
+          }
+        });
+      });
+      return btn;
+    }
+
+    function emptyState(text) { return el('div', { className: 'empty-state', text: text }); }
+
+    // ---------------- 沒有註冊的人 ----------------
+    function renderNotRegistered() {
+      const copy = el('button', { className: 'btn btn-secondary', type: 'button', text: '複製代碼' });
+      copy.addEventListener('click', async function () {
+        try {
+          await navigator.clipboard.writeText(currentUserId);
+          toast('已複製');
+        } catch (e) {
+          toast('無法自動複製，請長按上方代碼手動複製', true);
+        }
+      });
+      renderList(view, [el('div', { className: 'card' }, [
+        el('p', { text: '你尚未註冊，無法使用這個頁面。' }),
+        el('p', { className: 'muted', text: '請把下面這串代碼回報給管理員，請他幫你新增身分：' }),
+        el('div', { className: 'card mono', text: currentUserId }),
+        copy
+      ])]);
+    }
+
+    // ---------------- 案件卡片 ----------------
+    function caseCard(c, extra) {
+      const title = el('p');
+      title.appendChild(el('b', { text: c['案件編號'] }));
+      title.appendChild(textNode('｜' + c['問題類型']));
+      const children = [
+        el('span', { className: 'badge ' + (STATUS_BADGE[c['目前狀態']] || ''), text: c['目前狀態'] }),
+        title,
+        el('p', { className: 'muted', text: addressText(c) }),
+        el('p', { text: c['詳細描述'] || '' })
+      ];
+      [phoneLink('聯絡電話：', c['聯絡電話']), photoLink('查看住戶照片', c['屋主照片網址'])].forEach(function (n) {
+        if (n) children.push(n);
+      });
+      if (c['接單工人']) children.push(el('p', { className: 'muted', text: '接單工人：' + c['接單工人'] }));
+      (extra || []).forEach(function (n) { children.push(n); });
+      return el('div', { className: 'card' }, children);
+    }
+
+    // ---------------- 工人 ----------------
+    function startWorker(content) {
+      reload = async function () {
+        const data = await api('getCasesForStaff');
+        if (!data.cases.length) return renderList(content, [emptyState('目前沒有案件')]);
+        renderList(content, data.cases.map(function (c) { return workerCard(c); }));
+      };
+      return reload();
+    }
+
+    function workerCard(c) {
+      const caseId = c['案件編號'];
+      const mine = c['接單工人'] === me.name;
+      let extra = [];
+      if (c['目前狀態'] === '已指派') {
+        extra = [actionButton('接單', 'btn', function () { return api('acceptCase', { caseId: caseId }); })];
+      } else if (c['目前狀態'] === '工人接單' && mine) {
+        extra = [actionButton('開始施工', 'btn', function () { return api('startConstruction', { caseId: caseId }); })];
+      } else if (c['目前狀態'] === '施工中' && mine) {
+        const note = el('textarea', { placeholder: '完工說明', attrs: { maxlength: '500' } });
+        const photo = el('input', { type: 'file', attrs: { accept: 'image/*' } });
+        extra = [
+          el('label', { text: '完工說明' }), note,
+          el('label', { text: '完工照片（選填）' }), photo,
+          actionButton('送出審核', 'btn', async function () {
+            const photoUrl = await uploadPhotoIfAny(photo);
+            await api('submitForReview', { caseId: caseId, note: note.value, photoUrl: photoUrl });
+          })
+        ];
+      }
+      return caseCard(c, extra);
+    }
+
+    // ---------------- 負責人 ----------------
+    function startSupervisor(content) {
+      reload = async function () {
+        const data = await api('getCasesForStaff');
+        const pending = data.cases.filter(function (c) { return c['目前狀態'] === '待審核'; });
+        const others = data.cases.filter(function (c) { return c['目前狀態'] !== '待審核'; });
+        const nodes = [el('h3', { text: '待審核（' + pending.length + '）' })];
+        if (!pending.length) nodes.push(emptyState('目前沒有待審核案件'));
+        pending.forEach(function (c) { nodes.push(reviewCard(c)); });
+        nodes.push(el('h3', { text: '其他案件（' + others.length + '）' }));
+        if (!others.length) nodes.push(emptyState('沒有其他案件'));
+        others.forEach(function (c) { nodes.push(caseCard(c, [])); });
+        renderList(content, nodes);
+      };
+      return reload();
+    }
+
+    function reviewCard(c) {
+      const caseId = c['案件編號'];
+      const note = el('textarea', { placeholder: '審核備註（退回時建議填寫原因）', attrs: { maxlength: '500' } });
+      const extra = [el('p', { className: 'muted', text: '完工說明：' + (c['完工說明'] || '（未填）') })];
+      const done = photoLink('查看完工照片', c['完工照片網址']);
+      if (done) extra.push(done);
+      extra.push(note);
+      extra.push(el('div', { className: 'row-2' }, [
+        actionButton('核准結案', 'btn', function () { return api('reviewCase', { caseId: caseId, approved: true, note: note.value }); }),
+        actionButton('退回重做', 'btn btn-danger', function () { return api('reviewCase', { caseId: caseId, approved: false, note: note.value }); })
+      ]));
+      return caseCard(c, extra);
+    }
+
+    // ---------------- 管理員 ----------------
+    function startAdmin(content) {
+      const tabs = [
+        { label: '住戶審核', load: adminResidents },
+        { label: '案件總覽', load: adminCases },
+        { label: '設定', load: adminSettings }
+      ];
+      const bar = el('div', { className: 'tabs' });
+      const body = el('div');
+
+      function select(tab) {
+        tabs.forEach(function (t) { t.button.className = 'tab' + (t === tab ? ' active' : ''); });
+        reload = function () { return tab.load(body); };
+        return reload().catch(fail);
+      }
+      tabs.forEach(function (t) {
+        t.button = el('button', { className: 'tab', type: 'button', text: t.label });
+        t.button.addEventListener('click', function () { select(t); });
+        bar.appendChild(t.button);
+      });
+      renderList(content, [bar, body]);
+      return select(tabs[0]);
+    }
+
+    // -- 住戶審核 --
+    async function adminResidents(body) {
+      const list = await api('adminListResidents');
+      const known = [RESIDENT_STATUS.PENDING, RESIDENT_STATUS.APPROVED, RESIDENT_STATUS.DISABLED];
+      const groups = [
+        ['待核准', function (r) { return r['審核狀態'] === RESIDENT_STATUS.PENDING; }],
+        ['已核准', function (r) { return r['審核狀態'] === RESIDENT_STATUS.APPROVED; }],
+        ['已停用', function (r) { return r['審核狀態'] === RESIDENT_STATUS.DISABLED; }],
+        ['其他（舊資料，尚未設定審核狀態）', function (r) { return known.indexOf(r['審核狀態']) === -1; }]
+      ];
+      const nodes = [];
+      groups.forEach(function (g, i) {
+        const items = list.filter(g[1]).sort(function (a, b) {
+          return String(b['綁定時間']).localeCompare(String(a['綁定時間']));
+        });
+        if (i === 3 && !items.length) return;
+        nodes.push(el('h3', { text: g[0] + '（' + items.length + '）' }));
+        if (!items.length) nodes.push(el('p', { className: 'muted', text: '沒有資料' }));
+        items.forEach(function (r) { nodes.push(residentCard(r)); });
+      });
+      renderList(body, nodes);
+    }
+
+    function residentCard(r) {
+      const status = r['審核狀態'];
+      const uid = r['LINE_UserId'];
+      const title = el('p');
+      title.appendChild(el('b', { text: r['姓名'] || '（未填姓名）' }));
+      title.appendChild(textNode('　' + addressText(r)));
+      const children = [
+        el('span', { className: 'badge ' + (STATUS_BADGE[status] || 'badge-disabled'), text: status || '未設定' }),
+        title
+      ];
+      const phone = phoneLink('手機：', r['手機']);
+      if (phone) children.push(phone);
+      children.push(el('p', { className: 'muted', text: '綁定時間：' + r['綁定時間'] }));
+      (r.warnings || []).forEach(function (w) { children.push(el('div', { className: 'warn', text: '⚠ ' + w })); });
+      if (r['核准人']) children.push(el('p', { className: 'muted', text: '處理人：' + r['核准人'] + '（' + r['核准時間'] + '）' }));
+
+      const approve = actionButton('核准', 'btn', function () { return api('adminReviewResident', { targetUserId: uid, decision: '核准' }); });
+      const disable = actionButton('停用', 'btn btn-danger', function () { return api('adminReviewResident', { targetUserId: uid, decision: '停用' }); });
+      if (status === RESIDENT_STATUS.PENDING) {
+        children.push(el('div', { className: 'row-2' }, [approve, disable]));
+      } else if (status === RESIDENT_STATUS.APPROVED) {
+        children.push(disable);
+      } else {
+        children.push(approve);
+      }
+      return el('div', { className: 'card' }, children);
+    }
+
+    // -- 案件總覽（唯讀） --
+    async function adminCases(body) {
+      const data = await api('getCasesForStaff');
+      const cases = data.cases.slice().sort(function (a, b) {
+        return String(b['報修時間']).localeCompare(String(a['報修時間']));
+      });
+      const nodes = [el('h3', { text: '全部案件（' + cases.length + '）' })];
+      if (!cases.length) nodes.push(emptyState('目前沒有案件'));
+      cases.forEach(function (c) {
+        const extra = [el('p', { className: 'muted', text: '指派公司：' + c['指派公司'] })];
+        if (c['完工說明']) extra.push(el('p', { className: 'muted', text: '完工說明：' + c['完工說明'] }));
+        nodes.push(caseCard(c, extra));
+      });
+      renderList(body, nodes);
+    }
+
+    // -- 設定 --
+    async function adminSettings(body) {
+      const data = await api('getAdminData');
+      const companyNames = data.companies.map(function (c) { return c['公司簡稱']; });
+      const nodes = [];
+
+      // 問題類型 → 負責公司
+      const issueName = el('input', { placeholder: '例如：電梯' });
+      const issueCompany = selectOf(companyNames);
+      nodes.push(el('h3', { text: '問題類型 → 負責公司' }));
+      nodes.push(el('div', { className: 'card' }, data.issueTypeMap.map(function (r) {
+        return el('p', { text: r['問題類型'] + ' → ' + r['負責公司'] });
+      }).concat(
+        labeled('新增問題類型', issueName),
+        labeled('負責公司', issueCompany),
+        [actionButton('新增', 'btn', function () {
+          return api('adminAddIssueType', { issueType: issueName.value, company: issueCompany.value });
+        })]
+      )));
+
+      // 公司清單
+      const companyName = el('input', { placeholder: '簡短統一的名稱，例如：XX' });
+      nodes.push(el('h3', { text: '公司清單' }));
+      nodes.push(el('div', { className: 'card' }, companyNames.map(function (n) {
+        return el('p', { text: n });
+      }).concat(
+        labeled('新增公司簡稱', companyName),
+        [actionButton('新增', 'btn', function () { return api('adminAddCompany', { name: companyName.value }); })]
+      )));
+
+      // 新增內部人員
+      const staffId = el('input', { attrs: { autocomplete: 'off' } });
+      const staffName = el('input', { attrs: { maxlength: '20' } });
+      const staffRole = selectOf([ROLE.WORKER, ROLE.SUPERVISOR, ROLE.ADMIN]);
+      const staffCompany = selectOf(companyNames);
+      nodes.push(el('h3', { text: '新增內部人員' }));
+      nodes.push(el('div', { className: 'card' }, [
+        el('p', { className: 'muted', text: '請對方先打開「叫修清單」，畫面上會顯示他的代碼，請他複製給你貼在下面。管理員角色不需要選公司。' })
+      ].concat(
+        labeled('LINE_UserId（對方的代碼）', staffId),
+        labeled('姓名', staffName),
+        labeled('角色', staffRole),
+        labeled('所屬公司', staffCompany),
+        [actionButton('新增', 'btn', async function () {
+          await api('adminAddStaff', {
+            newUserId: staffId.value, role: staffRole.value, company: staffCompany.value, name: staffName.value
+          });
+          toast('已新增');
+        })]
+      )));
+
+      // 社區設定
+      const inputs = {};
+      const settingsCard = el('div', { className: 'card' });
+      data.settings.forEach(function (s) {
+        inputs[s['設定類型']] = el('input', { value: s['值'] });
+        labeled(s['設定類型'], inputs[s['設定類型']]).forEach(function (n) { settingsCard.appendChild(n); });
+      });
+      settingsCard.appendChild(actionButton('儲存設定', 'btn', async function () {
+        const keys = Object.keys(inputs);
+        for (let i = 0; i < keys.length; i++) {
+          await api('adminUpdateSetting', { key: keys[i], value: inputs[keys[i]].value });
+        }
+        toast('設定已儲存');
+      }));
+      nodes.push(el('h3', { text: '社區設定' }));
+      nodes.push(settingsCard);
+
+      renderList(body, nodes);
+    }
+  </script>
+</body>
+</html>

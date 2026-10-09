@@ -1,0 +1,33 @@
+這個資料夾放的是「靜態網頁」，要上傳到 GitHub Pages（網頁放這裡，資料在 Google Sheet，
+中間由 Apps Script 當 API）。檔名是英文，這裡用中文說明每個檔案的作用。
+
+config.js
+  每個社區「唯一需要修改」的設定檔：LIFF ID 與後端 API 網址。兩個都不是機密。
+
+common.js
+  三個頁面共用的程式：深淺色主題切換、安全組畫面的小工具（不用字串拼接 HTML，避免 XSS）、
+  LINE 登入（LIFF）、呼叫後端 API、照片縮圖後上傳。
+  注意：檔案裡的狀態名稱（已指派、待核准…）要和後端 程式碼\Config.gs 一致，改名時兩邊都要改。
+
+styles.css
+  三個頁面共用的樣式（含深色主題、手機窄螢幕排版）。
+
+index.html
+  備用入口，列出三個功能的連結（正常情況住戶都從 LINE 圖文選單進入）。
+
+resident-form.html
+  住戶用：第一次使用先綁定門牌（等管理員核准）→ 核准後可送叫修單（含照片）。
+
+progress-tracker.html
+  住戶與工人用：唯讀的施工進度查詢。
+
+staff-dashboard.html
+  內部人員用，依身分顯示不同功能：
+  工人＝接單／開始施工／送審；負責人＝審核自己公司的完工申請；
+  管理員＝住戶審核、案件總覽、設定（問題類型、公司、內部人員、社區設定）。
+
+圖文選單的網址格式（LIFF ID 換成自己的）：
+  我要叫修      https://liff.line.me/LIFF_ID/resident-form.html
+  叫修清單      https://liff.line.me/LIFF_ID/staff-dashboard.html
+  施工進度查詢  https://liff.line.me/LIFF_ID/progress-tracker.html
+  （這個網址寫法是否能正確帶到對應頁面，尚未在手機上實測）

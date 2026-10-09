@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>社區報修 · 我要叫修</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>社區報修 · 我要叫修</h1>
+    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切換深淺色">🌓</button>
+  </div>
+  <div class="container">
+    <div id="loading" class="empty-state">載入中…</div>
+    <div id="view"></div>
+  </div>
+
+  <script>
+    'use strict';
+    let options = null;
+    let binding = null;
+    const view = document.getElementById('view');
+
+    boot(async function () {
+      const results = await Promise.all([api('getFormOptions'), api('getResidentBinding')]);
+      options = results[0];
+      binding = results[1];
+      document.getElementById('loading').style.display = 'none';
+      render();
+    });
+
+    function render() {
+      if (!binding) return renderBindForm();
+      if (binding['審核狀態'] === RESIDENT_STATUS.PENDING) return renderPending();
+      if (binding['審核狀態'] === RESIDENT_STATUS.APPROVED) return renderRepairForm();
+      return renderDisabled();
+    }
+
+    // ---- 第一次使用：綁定門牌 ----
+    function renderBindForm() {
+      const building = selectOf(options.buildings);
+      const unitNo = el('input', { type: 'text', placeholder: '例如 5', attrs: { inputmode: 'numeric', maxlength: '3', autocomplete: 'off' } });
+      const floor = selectOf(range(1, options.floorMax));
+      const unitIndex = selectOf(range(1, options.unitMax));
+      const name = el('input', { type: 'text', placeholder: '住戶姓名', attrs: { maxlength: '20', autocomplete: 'name' } });
+      const phone = el('input', { type: 'tel', placeholder: '09 開頭的 10 碼手機', attrs: { inputmode: 'numeric', maxlength: '20', autocomplete: 'tel' } });
+      const error = el('div', { className: 'field-error' });
+      const submit = el('button', { className: 'btn', type: 'button', text: '送出綁定' });
+
+      submit.addEventListener('click', function () {
+        error.textContent = '';
+        if (!unitNo.value.trim() || !name.value.trim() || !phone.value.trim()) {
+          error.textContent = '請把「號」、姓名、手機都填寫完整';
+          return;
+        }
+        runBusy(submit, async function () {
+          try {
+            binding = await api('bindResident', {
+              form: {
+                building: building.value, unitNo: unitNo.value, floor: floor.value,
+                unitIndex: unitIndex.value, name: name.value, phone: phone.value
+              }
+            });
+            render();
+          } catch (e) {
+            error.textContent = e.message;
+          }
+        });
+      });
+
+      renderList(view, [el('div', { className: 'card' }, [
+        el('p', { className: 'muted', text: '第一次使用，請填寫住戶資料。送出後由管理員核准，通過後就能叫修，並會收到 LINE 通知。' }),
+        el('div', { className: 'row-2' }, [
+          el('div', {}, labeled('棟號', building)),
+          el('div', {}, labeled('號', unitNo))
+        ]),
+        el('div', { className: 'row-2' }, [
+          el('div', {}, labeled('樓層', floor)),
+          el('div', {}, labeled('之幾', unitIndex))
+        ]),
+        el('label', { text: '姓名' }), name,
+        el('label', { text: '手機' }), phone,
+        submit, error
+      ])]);
+    }
+
+    // ---- 等待核准 ----
+    function renderPending() {
+      const refresh = el('button', { className: 'btn btn-secondary', type: 'button', text: '重新整理狀態' });
+      refresh.addEventListener('click', function () {
+        runBusy(refresh, async function () {
+          try {
+            binding = await api('getResidentBinding');
+            render();
+            if (binding && binding['審核狀態'] === RESIDENT_STATUS.PENDING) toast('還在等待管理員核准');
+          } catch (e) {
+            toast(e.message, true);
+          }
+        });
+      });
+      renderList(view, [el('div', { className: 'card' }, [
+        el('span', { className: 'badge ' + STATUS_BADGE['待核准'], text: '等待管理員核准' }),
+        el('p', { text: binding['姓名'] + '　' + addressText(binding) }),
+        el('p', { className: 'muted', text: '管理員核准後會用 LINE 通知你，之後就可以叫修了。' }),
+        refresh
+      ])]);
+    }
+
+    function renderDisabled() {
+      renderList(view, [el('div', { className: 'card' }, [
+        el('span', { className: 'badge ' + STATUS_BADGE['已停用'], text: '無法使用' }),
+        el('p', { text: '這個帳號目前無法使用叫修服務，請聯絡管理員。' })
+      ])]);
+    }
+
+    // ---- 叫修表單 ----
+    function renderRepairForm() {
+      const issueType = selectOf(options.issueTypes);
+      const description = el('textarea', { placeholder: '請描述問題狀況', attrs: { maxlength: '1000' } });
+      const phone = el('input', { type: 'tel', value: binding['手機'], attrs: { inputmode: 'numeric', maxlength: '30' } });
+      const photo = el('input', { type: 'file', attrs: { accept: 'image/*' } });
+      const error = el('div', { className: 'field-error' });
+      const submit = el('button', { className: 'btn', type: 'button', text: '送出叫修' });
+
+      submit.addEventListener('click', function () {
+        error.textContent = '';
+        if (!description.value.trim()) {
+          error.textContent = '請填寫問題描述';
+          return;
+        }
+        runBusy(submit, async function () {
+          try {
+            const photoUrl = await uploadPhotoIfAny(photo);
+            const result = await api('submitRepairRequest', {
+              form: { issueType: issueType.value, description: description.value, phone: phone.value, photoUrl: photoUrl }
+            });
+            renderDone(result.caseId);
+          } catch (e) {
+            error.textContent = e.message;
+          }
+        });
+      });
+
+      renderList(view, [
+        el('div', { className: 'card muted', text: binding['姓名'] + '　' + addressText(binding) }),
+        el('div', { className: 'card' }, [
+          el('label', { text: '問題類型' }), issueType,
+          el('label', { text: '詳細描述' }), description,
+          el('label', { text: '聯絡電話（預設是你綁定的手機，可修改）' }), phone,
+          el('label', { text: '現場照片（選填）' }), photo,
+          submit, error
+        ])
+      ]);
+    }
+
+    function renderDone(caseId) {
+      const again = el('button', { className: 'btn btn-secondary', type: 'button', text: '再叫修一件', onClick: renderRepairForm });
+      renderList(view, [el('div', { className: 'card' }, [
+        el('p', {}, [textNode('✅ 叫修已送出，案件編號 '), el('b', { text: caseId })]),
+        el('p', { className: 'muted', text: '已通知負責廠商，可以到「施工進度查詢」查看處理狀況。' }),
+        again
+      ])]);
+    }
+  </script>
+</body>
+</html>

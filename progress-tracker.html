@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>施工進度查詢</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>施工進度查詢</h1>
+    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切換深淺色">🌓</button>
+  </div>
+  <div class="container">
+    <div id="loading" class="empty-state">載入中…</div>
+    <div id="list"></div>
+  </div>
+
+  <script>
+    'use strict';
+
+    boot(async function () {
+      const results = await Promise.all([api('getCasesForViewer'), api('getResidentBinding')]);
+      const cases = results[0];
+      const binding = results[1];
+      document.getElementById('loading').style.display = 'none';
+      const listEl = document.getElementById('list');
+
+      if (binding && binding['審核狀態'] !== RESIDENT_STATUS.APPROVED) {
+        renderList(listEl, [el('div', { className: 'empty-state', text: '住戶身分尚未通過管理員核准，核准後就能在這裡查看進度。' })]);
+        return;
+      }
+      if (!cases.length) {
+        renderList(listEl, [el('div', { className: 'empty-state', text: '目前沒有相關案件' })]);
+        return;
+      }
+      renderList(listEl, cases.map(caseCard));
+    });
+
+    function stepLine(currentStatus) {
+      const idx = CASE_STEPS.indexOf(currentStatus);
+      const wrap = el('p', { className: 'steps' });
+      CASE_STEPS.forEach(function (s, i) {
+        wrap.appendChild(el('span', { className: 'badge ' + STATUS_BADGE[s] + (i > idx ? ' badge-dim' : ''), text: s }));
+        if (i < CASE_STEPS.length - 1) wrap.appendChild(textNode(' → '));
+      });
+      return wrap;
+    }
+
+    function caseCard(c) {
+      const title = el('p');
+      title.appendChild(el('b', { text: c['案件編號'] }));
+      title.appendChild(textNode('｜' + c['問題類型']));
+      const children = [title, el('p', { className: 'muted', text: addressText(c) }), stepLine(c['目前狀態'])];
+      if (c['完工說明']) children.push(el('p', { className: 'muted', text: '完工說明：' + c['完工說明'] }));
+      return el('div', { className: 'card' }, children);
+    }
+  </script>
+</body>
+</html>
