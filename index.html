@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>社區報修系統</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
   <script src="common.js"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
   <div class="topbar">
@@ -13,7 +15,8 @@
     <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="切換深淺色">🌓</button>
   </div>
   <div class="container">
-    <div class="card">
+    <div id="loading" class="empty-state" style="display:none">登入中…</div>
+    <div class="card" id="menu">
       <p>請從 LINE 官方帳號的圖文選單進入本系統。</p>
       <p class="muted">如果選單打不開，可以從下面選你要的功能：</p>
       <p><a href="resident-form.html">我要叫修</a></p>
@@ -21,5 +24,14 @@
       <p><a href="staff-dashboard.html">叫修清單（內部人員）</a></p>
     </div>
   </div>
+  <script>
+    // 這頁是 LIFF 的 Endpoint URL：LINE 登入完、或從 liff.line.me/ID/某頁 進來，都會先到這裡並帶 liff.state，
+    // 由 liff.init() 換登入憑證後自動轉到目的頁。沒帶 liff.state 就照常顯示選單。
+    if (new URLSearchParams(location.search).has('liff.state')) {
+      document.getElementById('menu').style.display = 'none';
+      document.getElementById('loading').style.display = 'block';
+      liff.init({ liffId: window.APP_CONFIG.LIFF_ID }).catch(showFatal);
+    }
+  </script>
 </body>
 </html>
