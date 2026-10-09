@@ -136,6 +136,7 @@ async function runBusy(btn, fn) {
 // ---------- LINE 登入（LIFF） ----------
 
 const LIFF_TIMEOUT_MS = 20000;
+const ID_TOKEN_MIN_LEFT_SEC = 60;
 let currentUserId = null;
 
 function loginLiff() {
@@ -154,6 +155,12 @@ function loginLiff() {
     }, LIFF_TIMEOUT_MS);
 
     liff.init({ liffId: cfg.LIFF_ID }).then(function () {
+      // ID Token 約 1 小時就過期，但在 LINE 以外的瀏覽器 isLoggedIn() 仍會是 true，所以要自己檢查到期時間
+      const old = liff.isLoggedIn() ? liff.getDecodedIDToken() : null;
+      // LINE App 內每次開啟都會拿到新的 token，而且不能 logout／login，只在外部瀏覽器處理
+      if (old && !liff.isInClient() && old.exp - Date.now() / 1000 < ID_TOKEN_MIN_LEFT_SEC) {
+        liff.logout();
+      }
       if (!liff.isLoggedIn()) {
         // 沒帶 redirectUri 時，登入完會回到 Endpoint URL（首頁），首頁沒有載入 LIFF 而無法完成登入
         liff.login({ redirectUri: location.href });
