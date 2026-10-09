@@ -155,7 +155,8 @@ function loginLiff() {
 
     liff.init({ liffId: cfg.LIFF_ID }).then(function () {
       if (!liff.isLoggedIn()) {
-        liff.login();
+        // 沒帶 redirectUri 時，登入完會回到 Endpoint URL（首頁），首頁沒有載入 LIFF 而無法完成登入
+        liff.login({ redirectUri: location.href });
         return;
       }
       const decoded = liff.getDecodedIDToken();
