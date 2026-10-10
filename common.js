@@ -58,11 +58,14 @@ function safeUrl(u) {
   return /^https:\/\//i.test(String(u || '')) ? u : '';
 }
 
-function photoLink(label, url) {
-  const safe = safeUrl(url);
-  if (!safe) return null;
-  const p = el('p');
-  p.appendChild(el('a', { text: label, href: safe, external: true }));
+// 照片欄可能有多個網址（換行分隔，對應後端 PHOTO_URL_SEPARATOR）；只有一張時顯示跟改版前一樣
+function photoLink(label, value) {
+  const urls = String(value || '').split('\n').map(safeUrl).filter(Boolean);
+  if (!urls.length) return null;
+  const p = el('p', { className: 'photo-links' });
+  urls.forEach(function (u, i) {
+    p.appendChild(el('a', { text: urls.length > 1 ? label + ' ' + (i + 1) : label, href: u, external: true }));
+  });
   return p;
 }
 
@@ -255,9 +258,35 @@ function prepareImage(file) {
 }
 
 // 有選照片就上傳並回傳網址，沒選就回傳空字串
-async function uploadPhotoIfAny(fileInput) {
-  const file = fileInput.files && fileInput.files[0];
-  if (!file) return '';
-  const img = await prepareImage(file);
-  return api('uploadPhoto', { base64: img.base64, mimeType: img.mimeType });
+const PHOTO_MAX = 5; // 跟後端 Config.gs 的 INPUT_LIMITS.PHOTO_COUNT 一致（後端才是真正把關的地方）
+
+// 可多選的照片欄位。field 放進畫面；upload() 依序上傳並回傳網址陣列（沒選照片就是空陣列）
+function photoPicker() {
+  const input = el('input', { type: 'file', attrs: { accept: 'image/*', multiple: '' } });
+  const hint = el('div', { className: 'muted' });
+  function showCount() {
+    const n = input.files.length;
+    hint.textContent = n > PHOTO_MAX ? '最多 ' + PHOTO_MAX + ' 張，目前選了 ' + n + ' 張，請重新選擇'
+      : (n ? '已選 ' + n + ' 張' : '可一次選多張，最多 ' + PHOTO_MAX + ' 張');
+  }
+  input.addEventListener('change', showCount);
+  showCount();
+  return {
+    field: el('div', {}, [input, hint]),
+    upload: async function () {
+      const files = Array.from(input.files || []);
+      if (files.length > PHOTO_MAX) throw new Error('照片最多 ' + PHOTO_MAX + ' 張，請重新選擇');
+      const urls = [];
+      try {
+        for (let i = 0; i < files.length; i++) {
+          hint.textContent = '照片上傳中 ' + (i + 1) + ' / ' + files.length + '…';
+          const img = await prepareImage(files[i]);
+          urls.push(await api('uploadPhoto', { base64: img.base64, mimeType: img.mimeType }));
+        }
+      } finally {
+        showCount();
+      }
+      return urls;
+    }
+  };
 }

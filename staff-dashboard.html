@@ -121,13 +121,13 @@
         extra = [actionButton('開始施工', 'btn', function () { return api('startConstruction', { caseId: caseId }); })];
       } else if (c['目前狀態'] === '施工中' && mine) {
         const note = el('textarea', { placeholder: '完工說明', attrs: { maxlength: '500' } });
-        const photo = el('input', { type: 'file', attrs: { accept: 'image/*' } });
+        const photos = photoPicker();
         extra = [
           el('label', { text: '完工說明' }), note,
-          el('label', { text: '完工照片（選填）' }), photo,
+          el('label', { text: '完工照片（選填）' }), photos.field,
           actionButton('送出審核', 'btn', async function () {
-            const photoUrl = await uploadPhotoIfAny(photo);
-            await api('submitForReview', { caseId: caseId, note: note.value, photoUrl: photoUrl });
+            const photoUrls = await photos.upload();
+            await api('submitForReview', { caseId: caseId, note: note.value, photoUrls: photoUrls });
           })
         ];
       }

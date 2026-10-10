@@ -122,7 +122,7 @@
       const issueType = selectOf(options.issueTypes);
       const description = el('textarea', { placeholder: '請描述問題狀況', attrs: { maxlength: '1000' } });
       const phone = el('input', { type: 'tel', value: binding['手機'], attrs: { inputmode: 'numeric', maxlength: '30' } });
-      const photo = el('input', { type: 'file', attrs: { accept: 'image/*' } });
+      const photos = photoPicker();
       const error = el('div', { className: 'field-error' });
       const submit = el('button', { className: 'btn', type: 'button', text: '送出叫修' });
 
@@ -134,9 +134,9 @@
         }
         runBusy(submit, async function () {
           try {
-            const photoUrl = await uploadPhotoIfAny(photo);
+            const photoUrls = await photos.upload();
             const result = await api('submitRepairRequest', {
-              form: { issueType: issueType.value, description: description.value, phone: phone.value, photoUrl: photoUrl }
+              form: { issueType: issueType.value, description: description.value, phone: phone.value, photoUrls: photoUrls }
             });
             renderDone(result.caseId);
           } catch (e) {
@@ -151,7 +151,7 @@
           el('label', { text: '問題類型' }), issueType,
           el('label', { text: '詳細描述' }), description,
           el('label', { text: '聯絡電話（預設是你綁定的手機，可修改）' }), phone,
-          el('label', { text: '現場照片（選填）' }), photo,
+          el('label', { text: '現場照片（選填）' }), photos.field,
           submit, error
         ])
       ]);
